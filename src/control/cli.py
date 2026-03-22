@@ -176,6 +176,76 @@ def _inbox_entry_summary(index: int, entry: str) -> str:
     return f"{index}. {entry.splitlines()[0]}"
 
 
+def _normalize_mission_id(mission_id: str) -> str:
+    normalized = mission_id.strip()
+    if not normalized.isdigit():
+        raise typer.BadParameter("El id de mision debe ser numerico")
+    return f"{int(normalized):03d}"
+
+
+def _mission_file_path(mission_id: str) -> Path:
+    return Path(".control/briefings") / f"mission_{_normalize_mission_id(mission_id)}.md"
+
+
+def _mission_context(mission_file: Path) -> tuple[str, str]:
+    assigned_to = "99"
+    title = mission_file.stem
+
+    for line in mission_file.read_text(encoding="utf-8").splitlines():
+        if line.startswith("assigned_to: "):
+            assigned_to = line.split(":", 1)[1].strip()
+        elif line.startswith("# "):
+            title = line.replace("# ", "", 1).strip()
+            for prefix in ["🎯 Misión: ", "🎯 Mision: ", "Misión: ", "Mision: "]:
+                if title.startswith(prefix):
+                    title = title.replace(prefix, "", 1)
+                    break
+
+    return assigned_to, title
+
+
+def _close_mission_briefing(mission_file: Path, actor: str, note: str) -> tuple[str, str]:
+    content = mission_file.read_text(encoding="utf-8")
+    assigned_to, title = _mission_context(mission_file)
+
+    if "status: OPEN" in content:
+        content = content.replace("status: OPEN", "status: DONE", 1)
+
+    date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    log_line = f"- [{date_str}] [{actor}]: Mision cerrada desde CLI."
+    if note:
+        log_line += f" {note}"
+
+    if not content.endswith("\n"):
+        content += "\n"
+    content += log_line + "\n"
+    mission_file.write_text(content, encoding="utf-8")
+    return assigned_to, title
+
+
+def _archive_inbox_entry_for_mission(agent: str, mission_file: Path, title: str) -> tuple[Path, bool]:
+    inbox_path = _ensure_agent_inbox(agent)
+    prefix, pending_entries, middle, history_entries = _load_inbox_entries(inbox_path)
+    mission_ref = f"ref: {str(mission_file).replace(os.sep, '/')}"
+
+    for index, entry in enumerate(pending_entries):
+        if mission_ref in entry:
+            archived_entry = _replace_entry_status(pending_entries.pop(index), "ARCHIVED")
+            history_entries.insert(0, archived_entry)
+            _write_inbox_entries(inbox_path, prefix, pending_entries, middle, history_entries)
+            return inbox_path, True
+
+    date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    archived_entry = "\n".join([
+        f"- [{date_str}] [MISSION] [HIGH] [CONTROL] [ARCHIVED] {title}",
+        "  detalle: Mision archivada desde CLI sin entrada pendiente previa.",
+        f"  ref: {str(mission_file).replace(os.sep, '/')}"
+    ])
+    history_entries.insert(0, archived_entry)
+    _write_inbox_entries(inbox_path, prefix, pending_entries, middle, history_entries)
+    return inbox_path, False
+
+
 def _deliver_inbox_item(
     agent: str,
     item_type: str,
@@ -426,6 +496,31 @@ def inbox_archive(
     _write_inbox_entries(inbox_path, prefix, pending_entries, middle, history_entries)
 
     console.print(Panel(archived_entry.splitlines()[0], title="🗃️ Inbox Archived"))
+
+
+@app.command()
+def mission_close(
+    mission: str = typer.Option(..., "--mission", "-m", help="ID de la mision a cerrar"),
+    actor: str = typer.Option("99", "--actor", help="Agente que realiza el cierre"),
+    note: str = typer.Option("", "--note", "-n", help="Nota adicional para el log de cierre"),
+):
+    """Cierra una mision y sincroniza su inbox asociado."""
+    mission_file = _mission_file_path(mission)
+    if not mission_file.exists():
+        raise typer.BadParameter("La mision indicada no existe")
+
+    assigned_to, title = _close_mission_briefing(mission_file, actor, note)
+    inbox_path, archived_existing_entry = _archive_inbox_entry_for_mission(assigned_to, mission_file, title)
+
+    detail = "Entrada pendiente archivada." if archived_existing_entry else "Entrada archivada creada en historial."
+    console.print(Panel(
+        f"[bold green]Mision cerrada con exito.[/bold green]\n"
+        f"Mision: {mission_file.name}\n"
+        f"Agente: {assigned_to}\n"
+        f"Inbox: {inbox_path}\n"
+        f"Resultado inbox: {detail}",
+        title="✅ Mission Closed"
+    ))
 
 
 ###

@@ -25,6 +25,7 @@ $env:PYTHONPATH='src'
 - `inbox-pending`: lista entradas pendientes.
 - `inbox-ack`: marca una entrada como leida.
 - `inbox-archive`: mueve una entrada al historial.
+- `mission-close`: cierra una mision y sincroniza briefing e inbox.
 - `run-skill`: ejecuta una skill local de `.control/skills`.
 
 ## Estructura relevante
