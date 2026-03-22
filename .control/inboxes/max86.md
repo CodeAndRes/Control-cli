@@ -13,7 +13,7 @@ read_required_on_start: true
 
 ## Pendientes
 <!-- CONTROL:INBOX:PENDING -->
-- [2026-03-22 17:00] [MISSION] [HIGH] [CONTROL] Smoke test robust mission id
+- [2026-03-22 17:00] [MISSION] [HIGH] [CONTROL] [NEW] Smoke test robust mission id
   detalle: Nueva misión asignada a Max86.
   ref: .control/briefings/mission_003.md
 

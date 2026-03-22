@@ -10,6 +10,9 @@ import datetime
 
 app = typer.Typer(help="🕵️ CONTROL: Cuartel General de Agentes (Agnóstico)")
 console = Console()
+PENDING_MARKER = "<!-- CONTROL:INBOX:PENDING -->"
+HISTORY_MARKER = "<!-- CONTROL:INBOX:HISTORY -->"
+HISTORY_HEADER = "## Historial"
 
 
 def _next_mission_id(briefing_dir: Path) -> str:
@@ -46,10 +49,10 @@ read_required_on_start: true
 - Este inbox centraliza notificaciones, contexto y referencias para el agente.
 
 ## Pendientes
-<!-- CONTROL:INBOX:PENDING -->
+{PENDING_MARKER}
 
 ## Historial
-<!-- CONTROL:INBOX:HISTORY -->
+{HISTORY_MARKER}
 """
 
 
@@ -65,14 +68,112 @@ def _ensure_agent_inbox(agent: str) -> Path:
 
 
 def _prepend_pending_item(inbox_path: Path, entry: str) -> None:
-    marker = "<!-- CONTROL:INBOX:PENDING -->"
     content = inbox_path.read_text(encoding="utf-8")
 
-    if marker not in content:
-        raise RuntimeError(f"Inbox mal formado: falta marcador {marker}")
+    if PENDING_MARKER not in content:
+        raise RuntimeError(f"Inbox mal formado: falta marcador {PENDING_MARKER}")
 
-    updated = content.replace(marker, f"{marker}\n{entry}", 1)
+    updated = content.replace(PENDING_MARKER, f"{PENDING_MARKER}\n{entry}", 1)
     inbox_path.write_text(updated, encoding="utf-8")
+
+
+def _split_inbox_sections(content: str) -> tuple[str, str, str, str]:
+    if PENDING_MARKER not in content or HISTORY_MARKER not in content or HISTORY_HEADER not in content:
+        raise RuntimeError("Inbox mal formado: faltan marcadores de seccion")
+
+    pending_start = content.index(PENDING_MARKER) + len(PENDING_MARKER)
+    history_header_start = content.index(HISTORY_HEADER)
+    history_content_start = content.index(HISTORY_MARKER) + len(HISTORY_MARKER)
+
+    prefix = content[:pending_start]
+    pending_section = content[pending_start:history_header_start]
+    middle = content[history_header_start:history_content_start]
+    history_section = content[history_content_start:]
+    return prefix, pending_section, middle, history_section
+
+
+def _parse_entries(section: str) -> list[str]:
+    lines = section.strip("\n").splitlines()
+    if not lines or all(not line.strip() for line in lines):
+        return []
+
+    entries: list[list[str]] = []
+    current: list[str] = []
+
+    for line in lines:
+        if line.startswith("- ["):
+            if current:
+                entries.append(current)
+            current = [line]
+            continue
+
+        if current:
+            current.append(line)
+
+    if current:
+        entries.append(current)
+
+    return ["\n".join(entry).rstrip() for entry in entries]
+
+
+def _render_entries(entries: list[str]) -> str:
+    if not entries:
+        return "\n"
+
+    return "\n" + "\n\n".join(entries) + "\n"
+
+
+def _load_inbox_entries(inbox_path: Path) -> tuple[str, list[str], str, list[str]]:
+    content = inbox_path.read_text(encoding="utf-8")
+    prefix, pending_section, middle, history_section = _split_inbox_sections(content)
+    return prefix, _parse_entries(pending_section), middle, _parse_entries(history_section)
+
+
+def _write_inbox_entries(
+    inbox_path: Path,
+    prefix: str,
+    pending_entries: list[str],
+    middle: str,
+    history_entries: list[str],
+) -> None:
+    content = "".join(
+        [
+            prefix,
+            _render_entries(pending_entries),
+            middle,
+            _render_entries(history_entries),
+        ]
+    )
+    inbox_path.write_text(content, encoding="utf-8")
+
+
+def _entry_status(entry: str) -> str:
+    first_line = entry.splitlines()[0]
+    if " [NEW] " in first_line:
+        return "NEW"
+    if " [ACK] " in first_line:
+        return "ACK"
+    if " [ARCHIVED] " in first_line:
+        return "ARCHIVED"
+    return "NEW"
+
+
+def _replace_entry_status(entry: str, new_status: str) -> str:
+    lines = entry.splitlines()
+    first_line = lines[0]
+
+    for current_status in ["NEW", "ACK", "ARCHIVED"]:
+        marker = f" [{current_status}] "
+        if marker in first_line:
+            lines[0] = first_line.replace(marker, f" [{new_status}] ", 1)
+            return "\n".join(lines)
+
+    lines[0] = first_line.replace("] ", f"] [{new_status}] ", 4)
+    return "\n".join(lines)
+
+
+def _inbox_entry_summary(index: int, entry: str) -> str:
+    return f"{index}. {entry.splitlines()[0]}"
 
 
 def _deliver_inbox_item(
@@ -87,7 +188,7 @@ def _deliver_inbox_item(
     inbox_path = _ensure_agent_inbox(agent)
     date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    entry_lines = [f"- [{date_str}] [{item_type}] [{priority}] [{origin}] {title}"]
+    entry_lines = [f"- [{date_str}] [{item_type}] [{priority}] [{origin}] [NEW] {title}"]
     if body:
         entry_lines.append(f"  detalle: {body}")
     if reference:
@@ -259,6 +360,72 @@ def message(
         f"Inbox: {inbox_path}",
         title="📬 CONTROL Message"
     ))
+
+
+@app.command()
+def inbox_pending(
+    agent: str = typer.Option("", "--agent", "-a", help="Agente a consultar. Si se omite, lista todos los inboxes."),
+):
+    """Lista las entradas pendientes del inbox."""
+    inbox_paths: list[Path]
+
+    if agent:
+        inbox_paths = [_ensure_agent_inbox(agent)]
+    else:
+        inbox_paths = [
+            path
+            for path in sorted(Path(".control/inboxes").glob("*.md"))
+            if path.name.lower() != "readme.md"
+        ]
+
+    reports: list[str] = []
+    for inbox_path in inbox_paths:
+        prefix, pending_entries, _, _ = _load_inbox_entries(inbox_path)
+        agent_line = next((line for line in prefix.splitlines() if line.startswith("agent: ")), f"agent: {inbox_path.stem}")
+        agent_name = agent_line.split(":", 1)[1].strip()
+        reports.append(f"Inbox {agent_name} ({len(pending_entries)} pendientes)")
+        if pending_entries:
+            reports.extend(_inbox_entry_summary(index, entry) for index, entry in enumerate(pending_entries, start=1))
+
+    console.print(Panel("\n".join(reports), title="📥 Inbox Pending"))
+
+
+@app.command()
+def inbox_ack(
+    agent: str = typer.Option(..., "--agent", "-a", help="Agente propietario del inbox"),
+    item: int = typer.Option(..., "--item", "-i", help="Indice 1-based de la entrada pendiente"),
+):
+    """Marca una entrada pendiente del inbox como leida."""
+    inbox_path = _ensure_agent_inbox(agent)
+    prefix, pending_entries, middle, history_entries = _load_inbox_entries(inbox_path)
+
+    if item < 1 or item > len(pending_entries):
+        raise typer.BadParameter("Indice de inbox fuera de rango")
+
+    updated_entry = _replace_entry_status(pending_entries[item - 1], "ACK")
+    pending_entries[item - 1] = updated_entry
+    _write_inbox_entries(inbox_path, prefix, pending_entries, middle, history_entries)
+
+    console.print(Panel(updated_entry.splitlines()[0], title="✅ Inbox ACK"))
+
+
+@app.command()
+def inbox_archive(
+    agent: str = typer.Option(..., "--agent", "-a", help="Agente propietario del inbox"),
+    item: int = typer.Option(..., "--item", "-i", help="Indice 1-based de la entrada pendiente"),
+):
+    """Mueve una entrada pendiente al historial del inbox."""
+    inbox_path = _ensure_agent_inbox(agent)
+    prefix, pending_entries, middle, history_entries = _load_inbox_entries(inbox_path)
+
+    if item < 1 or item > len(pending_entries):
+        raise typer.BadParameter("Indice de inbox fuera de rango")
+
+    archived_entry = _replace_entry_status(pending_entries.pop(item - 1), "ARCHIVED")
+    history_entries.insert(0, archived_entry)
+    _write_inbox_entries(inbox_path, prefix, pending_entries, middle, history_entries)
+
+    console.print(Panel(archived_entry.splitlines()[0], title="🗃️ Inbox Archived"))
 
 
 ###
