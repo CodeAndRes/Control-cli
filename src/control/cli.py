@@ -325,7 +325,8 @@ Eres el Agente {name}. Tu misión en este repositorio es...
 
 @app.command()
 def run_skill(
-    name: str = typer.Argument(..., help="Nombre de la skill a ejecutar")):
+    name: str = typer.Argument(..., help="Nombre de la skill a ejecutar"),
+    args: list[str] = typer.Argument(None, help="Argumentos opcionales para la skill")):
     skill_path = Path(f".control/skills/{name}/logic.py")
     
     if not skill_path.exists():
@@ -340,7 +341,7 @@ def run_skill(
         env["PYTHONIOENCODING"] = "utf-8"
 
         result = subprocess.run(
-            [sys.executable, str(skill_path)], 
+            [sys.executable, str(skill_path), *(args or [])], 
             capture_output=True, 
             text=True, 
             encoding="utf-8", # IMPORTANTE: Lee la salida como UTF-8
@@ -430,6 +431,38 @@ def message(
         f"Inbox: {inbox_path}",
         title="📬 CONTROL Message"
     ))
+
+
+@app.command()
+def clone_context(
+    agent: str = typer.Option(..., "--agent", "-a", help="Agente origen del resumen"),
+    clone_name: str = typer.Option("", "--clone-name", help="Nombre opcional para la nueva instancia clonada"),
+):
+    """Genera un resumen limpio de handoff/clonado para cualquier agente."""
+    skill_path = Path(".control/skills/clone_agent_context/logic.py")
+    if not skill_path.exists():
+        console.print("[bold red]❌ Error:[/bold red] La skill 'clone_agent_context' no existe.")
+        raise typer.Exit(code=1)
+
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["CONTROL_AGENT"] = agent
+    if clone_name:
+        env["CONTROL_CLONE_NAME"] = clone_name
+
+    result = subprocess.run(
+        [sys.executable, str(skill_path)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=env,
+    )
+
+    if result.returncode != 0:
+        console.print(f"[bold red]❌ Fallo en la clonacion:[/bold red]\n{result.stderr}")
+        raise typer.Exit(code=1)
+
+    console.print(Panel(result.stdout.strip(), title="🧬 Agent Clone Context"))
 
 
 @app.command()
