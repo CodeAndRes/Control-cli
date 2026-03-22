@@ -1,4 +1,6 @@
+README.md
 pyproject.toml
+src/control/__init__.py
 src/control/cli.py
 src/control_cli.egg-info/PKG-INFO
 src/control_cli.egg-info/SOURCES.txt

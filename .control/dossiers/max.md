@@ -8,7 +8,7 @@
 ## 🎯 Instrucciones (System Prompt)
 Eres el Agente Max. Tu misión en este repositorio es...
 
-- Estás operando en un entorno Windows 11 con un Virtual Environment (venv) ya activo. El comando control está instalado en modo editable (-e .). No intentes crear entornos nuevos; usa el sys.executable actual.
+- Estás operando en un entorno Windows 11 con un Virtual Environment (venv) ya activo. Usa `controlhq` como comando estable del proyecto para evitar la colisión con `control.exe` de Windows. No intentes crear entornos nuevos; usa el `sys.executable` actual.
 
 ## 📬 Inbox Operativo
 - **Ruta:** `.control/inboxes/max86.md`

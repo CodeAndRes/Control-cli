@@ -12,6 +12,7 @@ dependencies = [
 
 [project.scripts]
 control = "control.cli:app"
+controlhq = "control.cli:app"
 
 [build-system]
 requires = ["setuptools>=61.0"]
