@@ -25,11 +25,82 @@ def _next_mission_id(briefing_dir: Path) -> str:
 
     return f"{highest_id + 1:03d}"
 
+
+def _agent_slug(agent: str) -> str:
+    return agent.strip().lower().replace(" ", "_")
+
+
+def _render_inbox(agent: str) -> str:
+    agent_id = _agent_slug(agent)
+    return f"""---
+agent: {agent}
+agent_id: {agent_id}
+read_required_on_start: true
+---
+
+# 📬 Inbox: {agent}
+
+## Reglas
+- Leer este inbox al iniciar cualquier intervención.
+- Las misiones accionables se desarrollan en `.control/briefings`.
+- Este inbox centraliza notificaciones, contexto y referencias para el agente.
+
+## Pendientes
+<!-- CONTROL:INBOX:PENDING -->
+
+## Historial
+<!-- CONTROL:INBOX:HISTORY -->
+"""
+
+
+def _ensure_agent_inbox(agent: str) -> Path:
+    inbox_dir = Path(".control/inboxes")
+    inbox_dir.mkdir(parents=True, exist_ok=True)
+
+    inbox_path = inbox_dir / f"{_agent_slug(agent)}.md"
+    if not inbox_path.exists():
+        inbox_path.write_text(_render_inbox(agent), encoding="utf-8")
+
+    return inbox_path
+
+
+def _prepend_pending_item(inbox_path: Path, entry: str) -> None:
+    marker = "<!-- CONTROL:INBOX:PENDING -->"
+    content = inbox_path.read_text(encoding="utf-8")
+
+    if marker not in content:
+        raise RuntimeError(f"Inbox mal formado: falta marcador {marker}")
+
+    updated = content.replace(marker, f"{marker}\n{entry}", 1)
+    inbox_path.write_text(updated, encoding="utf-8")
+
+
+def _deliver_inbox_item(
+    agent: str,
+    item_type: str,
+    title: str,
+    body: str,
+    origin: str = "CONTROL",
+    reference: str | None = None,
+    priority: str = "NORMAL",
+) -> Path:
+    inbox_path = _ensure_agent_inbox(agent)
+    date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    entry_lines = [f"- [{date_str}] [{item_type}] [{priority}] [{origin}] {title}"]
+    if body:
+        entry_lines.append(f"  detalle: {body}")
+    if reference:
+        entry_lines.append(f"  ref: {reference.replace(os.sep, '/')}")
+
+    _prepend_pending_item(inbox_path, "\n".join(entry_lines) + "\n")
+    return inbox_path
+
 @app.command()
 def init():
     """Inicializa la Sede de la Agencia (.control) en el repo actual."""
     base_path = Path(".control")
-    folders = ["dossiers", "briefings", "skills", "outputs"]
+    folders = ["dossiers", "briefings", "skills", "outputs", "inboxes"]
     
     for folder in folders:
         (base_path / folder).mkdir(parents=True, exist_ok=True)
@@ -53,7 +124,9 @@ def recruit(
     c3: str = typer.Option("Ejecutor", "--c3", help="Rango: Orquestador, Ejecutor")
 ):
     """Recluta un nuevo agente bajo las 3 capas de CONTROL."""
-    dossier_path = Path(f".control/dossiers/{name.lower()}.md")
+    agent_id = _agent_slug(name)
+    dossier_path = Path(f".control/dossiers/{agent_id}.md")
+    inbox_path = _ensure_agent_inbox(name)
     
     content = f"""# 🕵️ Dossier: Agente {name.upper()}
 
@@ -65,6 +138,10 @@ def recruit(
 ## 🎯 Instrucciones (System Prompt)
 Eres el Agente {name}. Tu misión en este repositorio es...
 (Define aquí su comportamiento para que Copilot lo asuma)
+
+## 📬 Inbox Operativo
+- **Ruta:** `{inbox_path.as_posix()}`
+- **Regla:** Leer este inbox al inicio de cada intervención.
 
 ## 🛠️ Maletín de Skills
 - [ ] Listar skills aquí...
@@ -144,11 +221,43 @@ created_at: {date_str}
 """
     
     mission_file.write_text(content, encoding="utf-8")
+    inbox_path = _deliver_inbox_item(
+        agent=agent,
+        item_type="MISSION",
+        title=target,
+        body=f"Nueva misión asignada a {agent}.",
+        reference=str(mission_file),
+        priority="HIGH",
+    )
     console.print(Panel(
         f"[bold cyan]Misión {mission_id} emitida con éxito.[/bold cyan]\n"
         f"Archivo: {mission_file}\n"
-        f"Agente: {agent}",
+        f"Agente: {agent}\n"
+        f"Inbox: {inbox_path}",
         title="🛰️ Despacho de CONTROL"
+    ))
+
+
+@app.command()
+def message(
+    agent: str = typer.Option(..., "--agent", "-a", help="Agente destinatario"),
+    subject: str = typer.Option(..., "--subject", "-s", help="Asunto del mensaje"),
+    body: str = typer.Option("", "--body", "-b", help="Detalle adicional para el inbox"),
+):
+    """Envía un mensaje informativo al inbox de un agente."""
+    inbox_path = _deliver_inbox_item(
+        agent=agent,
+        item_type="MESSAGE",
+        title=subject,
+        body=body,
+        priority="NORMAL",
+    )
+
+    console.print(Panel(
+        f"[bold green]Mensaje entregado con éxito.[/bold green]\n"
+        f"Agente: {agent}\n"
+        f"Inbox: {inbox_path}",
+        title="📬 CONTROL Message"
     ))
 
 
