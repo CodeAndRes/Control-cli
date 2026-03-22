@@ -437,6 +437,11 @@ def message(
 def clone_context(
     agent: str = typer.Option(..., "--agent", "-a", help="Agente origen del resumen"),
     clone_name: str = typer.Option("", "--clone-name", help="Nombre opcional para la nueva instancia clonada"),
+    force_consciousness: bool = typer.Option(
+        False,
+        "--force-consciousness",
+        help="Permite regenerar aunque el volcado de conciencia previo siga en PENDIENTE",
+    ),
 ):
     """Genera un resumen limpio de handoff/clonado para cualquier agente."""
     skill_path = Path(".control/skills/clone_agent_context/logic.py")
@@ -449,6 +454,8 @@ def clone_context(
     env["CONTROL_AGENT"] = agent
     if clone_name:
         env["CONTROL_CLONE_NAME"] = clone_name
+    if force_consciousness:
+        env["CONTROL_FORCE_CONSCIOUSNESS"] = "1"
 
     result = subprocess.run(
         [sys.executable, str(skill_path)],

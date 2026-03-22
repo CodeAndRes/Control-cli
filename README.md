@@ -22,7 +22,7 @@ $env:PYTHONPATH='src'
 
 - `dispatch`: crea briefings de misión y notifica el inbox del agente.
 - `message`: envia mensajes informativos al inbox.
-- `clone-context`: genera un resumen limpio de handoff para cualquier agente.
+- `clone-context`: genera un resumen limpio de handoff para cualquier agente y bloquea regeneracion si el `Clone Consciousness Dump` previo no cumple validacion minima (campos clave completos + al menos 1 evidencia en `Git timeline evidence`). Usa `--force-consciousness` para forzar.
 - `inbox-pending`: lista entradas pendientes.
 - `inbox-ack`: marca una entrada como leida.
 - `inbox-archive`: mueve una entrada al historial.
