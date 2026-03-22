@@ -1,0 +1,2 @@
+[console_scripts]
+control = control.cli:app

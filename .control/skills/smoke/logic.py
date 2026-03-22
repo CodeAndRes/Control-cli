@@ -1,0 +1,1 @@
+print("SMOKE_OK")

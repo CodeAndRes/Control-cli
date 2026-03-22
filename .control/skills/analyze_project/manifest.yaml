@@ -1,0 +1,8 @@
+name: analyze_project
+description: Escanea la raíz del proyecto, lee el README y genera un inventario técnico.
+version: 1.0.0
+input: "Raíz del repositorio"
+output: ".control\outputs\project_inventory.md"
+usage_rules:
+  - Ejecutar al inicio de cada misión para situar al agente.
+  - No procesar carpetas pesadas (venv, node_modules, .git).
